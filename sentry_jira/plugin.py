@@ -226,6 +226,36 @@ class JIRAPlugin(IssuePlugin):
 
         return JSONResponse({'users': users})
 
+    def should_notify(self, group, event, is_new):
+
+        auto_create = self.get_option('auto_create', group.project)
+
+        if auto_create and is_new:
+            return True
+
+    def post_process(self, group, event, is_new, is_sample, **kwargs):
+        if self.should_notify(group, event, is_new):
+
+            # FIXME - these should be default params on JIRA
+            post_data = {'changing_issue_type' : 0,   # 0 by default
+                         'priority' : 4,
+                         'issue_type': 1}  # bug by default
+
+            form = self.new_issue_form(
+                post_data,
+                initial=self.get_initial_form_data({}, group, event),
+                ignored_fields=self.get_option("ignored_fields", group.project))
+
+            issue_id, error = self.create_issue(
+                group=group,
+                form_data=form.cleaned_data,
+            )
+
+            if issue_id and not error:
+                prefix = self.get_conf_key()
+                GroupMeta.objects.set_value(group, '%s:tid' % prefix, issue_id)
+
+
 class JSONResponse(Response):
     """
     Hack through the builtin response reliance on plugin.render for responses

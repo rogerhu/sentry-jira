@@ -36,6 +36,12 @@ class JIRAOptionsForm(forms.Form):
         required=False
     )
 
+    auto_create = forms.BooleanField(
+        label=_("Auto create JIRA tickets"),
+        help_text=_("Only enable if you want any event to auto-create JIRA tickets."),
+        required=False
+    )
+
     def __init__(self, *args, **kwargs):
         super(JIRAOptionsForm, self).__init__(*args, **kwargs)
 
