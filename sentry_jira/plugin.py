@@ -56,6 +56,15 @@ class JIRAPlugin(IssuePlugin):
             'description': self._get_group_description(request, group, event),
         }
 
+        default_priority = self.get_option('default_priority', group.project)
+        if default_priority:
+            initial['default_priority'] = default_priority
+
+        default_issue_type = self.get_option('default_issue_type', group.project)
+
+        if default_issue_type:
+            initial['default_issue_type'] = default_issue_type
+
         return initial
 
     def get_new_issue_title(self):
