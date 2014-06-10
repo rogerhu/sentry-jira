@@ -12,7 +12,7 @@ from sentry.plugins.bases.issue import IssuePlugin
 from sentry.utils import json
 
 from sentry_jira import VERSION as PLUGINVERSION
-from sentry_jira.forms import JIRAOptionsForm, JIRAIssueForm
+from sentry_jira.forms import JIRAOptionsForm, JIRAIssueForm, JIRAIssueLinkForm
 from sentry_jira.jira import JIRAClient
 
 
@@ -67,8 +67,16 @@ class JIRAPlugin(IssuePlugin):
 
         return initial
 
-    def get_new_issue_title(self):
-        return "Create JIRA Issue"
+    def get_issue_title(self):
+        return "Create or Link JIRA Issue"
+
+    def create_or_link_issue(self, request, group, form_data, **kwargs):
+        link_form = JIRAIssueLinkForm(request.POST or None,
+            initial = {'project_key': self.get_option('default_project', group.project), 'project': group.project}
+
+        )
+
+        context = {'form_create': form, 'from_link': link_form, 'title': self.get_new_issue_title()}
 
     def create_issue(self, request, group, form_data, **kwargs):
         """
@@ -93,6 +101,21 @@ class JIRAPlugin(IssuePlugin):
             else:
                 errdict["__all__"] = "Something went wrong, Sounds like a configuration issue: code %s" % issue_response.status_code
             return None, errdict
+
+    def link_issue(self, group, form_data):
+
+        jira_client = self.get_jira_client(group.project)
+        issue_id = form_data['issue_id'].value()
+        issue_response = jira_client.get_issue(issue_id)
+        status_code = issue_response.status_code
+
+        errdict = {"__all__": None}
+        if status_code in [200, 201]: # weirdly inconsistent.
+            return issue_response.json.get("key"), None
+        elif status_code == 404:
+            errdict = {"__all__": 'issue is not found, or the user does not have permission to view it'}
+            return None, errdict
+        return None, errdict
 
     def get_issue_url(self, group, issue_id, **kwargs):
         instance = self.get_option('instance_url', group.project)
@@ -132,56 +155,74 @@ class JIRAPlugin(IssuePlugin):
         # Auto-complete handler
         if request.GET.get("user_autocomplete"):
             return self.handle_user_autocomplete(request, group, **kwargs)
+        if request.GET.get("issue_autocomplete"):
+            return self.handle_issue_autocomplete(request, group, **kwargs)
         #######################################################################
 
         prefix = self.get_conf_key()
         event = group.get_latest_event()
 
-        # Added the ignored_fields to the new_issue_form call
-        form = self.new_issue_form(
-            request.POST or None,
-            initial=self.get_initial_form_data(request, group, event),
-            jira_client=self.get_jira_client(group.project),
-            project_key=self.get_option('default_project', group.project),
-            ignored_fields=self.get_option("ignored_fields", group.project))
-        #######################################################################
-        # to allow the form to be submitted, but ignored so that dynamic fields
-        # can change if the issuetype is different
-        #
-        if request.POST and request.POST.get("changing_issuetype") == "0":
-        #######################################################################
-            if form.is_valid():
-                issue_id, error = self.create_issue(
-                    group=group,
-                    form_data=form.cleaned_data,
-                    request=request,
-                )
+        if request.POST and request.POST.get("link_issue") == "link_jira_issue":
+            link_form = JIRAIssueLinkForm(request.POST or None,
+                                          initial={'project_key': self.get_option('default_project', group.project),
+                                                   'project': group.project})
+
+            if link_form.is_valid():
+                issue_id, error = self.link_issue(group=group, form_data=link_form)
                 if error:
-                    form.errors.update(error)
+                   link_form.errors['issue_id'] = [error]
+                if link_form.is_valid():
+                   GroupMeta.objects.set_value(group, '%s:tid' % prefix, issue_id)
+                   return self.redirect(reverse('sentry-group', args=[group.team.slug, group.project_id, group.pk]))
 
-                    # Register field errors which were returned from the JIRA
-                    # API, but were marked as ignored fields in the
-                    # configuration with the global error reporter for the form
-                    ignored_errors = [v for k, v in error.items()
-                                      if k in form.ignored_fields.split(",")]
-                    if len(ignored_errors) > 0:
-                        errs = form.errors['__all__']
-                        errs.append("Validation Error on ignored field, check"
-                                    " your plugin settings.")
-                        errs.extend(ignored_errors)
-                        form.errors['__all__'] = errs
-
-            if form.is_valid():
-                GroupMeta.objects.set_value(group, '%s:tid' % prefix, issue_id)
-
-                return self.redirect(reverse('sentry-group', args=[group.team.slug, group.project_id, group.pk]))
         else:
-            for name, field in form.fields.items():
-                form.errors[name] = form.error_class()
+            # Added the ignored_fields to the new_issue_form call
+            form = self.new_issue_form(
+                request.POST or None,
+                initial=self.get_initial_form_data(request, group, event),
+                jira_client=self.get_jira_client(group.project),
+                project_key=self.get_option('default_project', group.project),
+                ignored_fields=self.get_option("ignored_fields", group.project))
+            #######################################################################
+            # to allow the form to be submitted, but ignored so that dynamic fields
+            # can change if the issuetype is different
+            #
+            if request.POST and request.POST.get("changing_issuetype") == "0":
+            #######################################################################
+                if form.is_valid():
+
+                    issue_id, error = self.create_issue(
+                        group=group,
+                        form_data=form.cleaned_data,
+                        request=request,
+                    )
+                    if error:
+                        form.errors.update(error)
+
+                        # Register field errors which were returned from the JIRA
+                        # API, but were marked as ignored fields in the
+                        # configuration with the global error reporter for the form
+                        ignored_errors = [v for k, v in error.items()
+                                          if k in form.ignored_fields.split(",")]
+                        if len(ignored_errors) > 0:
+                            errs = form.errors['__all__']
+                            errs.append("Validation Error on ignored field, check"
+                                        " your plugin settings.")
+                            errs.extend(ignored_errors)
+                            form.errors['__all__'] = errs
+
+                if form.is_valid():
+                    GroupMeta.objects.set_value(group, '%s:tid' % prefix, issue_id)
+
+                    return self.redirect(reverse('sentry-group', args=[group.team.slug, group.project_id, group.pk]))
+            else:
+                for name, field in form.fields.items():
+                    form.errors[name] = form.error_class()
 
         context = {
             'form': form,
-            'title': self.get_new_issue_title(),
+            'from_link': link_form,
+            'title': self.get_title(),
             }
 
         return self.render(self.create_issue_template, context)

@@ -9,16 +9,43 @@
     <div class="page-header">
         <h3>{{ title }}</h3>
     </div>
-    <p>This will create an issue in JIRA and create a link within the Sentry Event.</p>
-    <br />
-    <form class="form-horizontal" action="" method="post" id="jira_issue_form">
-        <input type="hidden" value="0" id="changing_issuetype" name="changing_issuetype" />
-        {% csrf_token %}
-        {{ form|crispy }}
-        <div class="form-actions">
-            <button type="submit" class="btn btn-primary">{% trans "Create JIRA Issue" %}</button>
+    <div class="span6 row">
+        <div class="span2">
+            <input type="radio" class="span1" name="mode" value="create" checked="checked">
+            <span class="span1">{% trans "Create" %}</span>
         </div>
-    </form>
+        <div class="span2">
+            <input type="radio" class="span1" name="mode" value="link">
+            <span class="span1">{% trans "Link" %}</span>
+        </div>
+    </div>
+
+    <div class="row" id="create_jira_ticket">
+        <span class="row">This will create an issue in JIRA and create a link within the Sentry Event.</span>
+
+        <form class="form-horizontal" action="" method="post" id="jira_create_form">
+            <input type="hidden" value="create_jira_issue" id="create_issue" name="create_issue" checked="true"/>
+            <input type="hidden" value="0" id="changing_issuetype" name="changing_issuetype"/>
+            {% csrf_token %}
+            {{ form|crispy }}
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">{% trans "Create JIRA Issue" %}</button>
+            </div>
+        </form>
+    </div>
+
+    <div id="link_jira_ticket">
+        <span class="row">This will link to an existing issue in JIRA and create a link within the Sentry Event.</span>
+        <form class="form-horizontal" action="" method="post" id="jira_link_form">
+            <input  type="hidden" value="link_jira_issue" id="link_issue" name="link_issue"/>
+            {% csrf_token %}
+            {{ from_link|crispy }}
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">{% trans "Link JIRA Issue" %}</button>
+            </div>
+        </form>
+    </div>
+
 </div>
 {% endblock %}
 
@@ -27,10 +54,10 @@
     <script type="text/javascript">
         $(document).ready(function(){
             // bind regular selects and multiselects to use select2
-            $("#jira_issue_form").find("select").select2({"width": "460px"});
+            $("#jira_create_form").find("select").select2({"width": "460px"});
 
             // user autocompletion!
-            $("#jira_issue_form").find("input.user-selector").each(function(i, el){
+            $("#jira_create_form").find("input.user-selector").each(function(i, el){
                 var $el = $(el);
                 $el.select2({
                     placeholder: "Select a User",
@@ -62,10 +89,27 @@
                 });
             });
 
+            function setSelection(selectedMode) {
+                if (selectedMode === 'create') {
+                    $("#link_jira_ticket").hide();
+                    $("#create_jira_ticket").show();
+                }
+                else {
+                    $("#create_jira_ticket").hide();
+                    $("#link_jira_ticket").show();
+                }
+            };
+
+            $("input[name='mode']").change(function () {
+                setSelection($("input[name='mode']:checked").val());
+            });
+
+            $("input[name='mode']:checked").trigger('change');
+
             // refresh the page with updated form based on issue type.
-            $("#id_issuetype").on("change", function(){
+            $("#id_issuetype").on("change", function () {
                 $("#changing_issuetype").val("1");
-                $("#jira_issue_form").submit();
+                $("#jira_create_form").submit();
             });
         });
     </script>
